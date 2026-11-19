@@ -1,9 +1,11 @@
 'use strict';
 
-if (requireAuth()) {
+// Lógica del verificador de precios, modo quiosco y escáner (consultar.html)
+(async () => {
+  if (!(await requireAuth())) return;
   renderHeader('consultar.html');
 
-  const AUTO_CLEAR_MS = 10000; // en modo quiosco, la pantalla se limpia sola
+  const AUTO_CLEAR_MS = 10000; // Tiempo en ms para limpiar pantalla en modo quiosco
   const input = $('#barcode');
   const msg = $('#msg');
   const result = $('#result');
@@ -14,7 +16,6 @@ if (requireAuth()) {
   let kiosk = false;
   let clearTimer = null;
 
-  /* ---------- Consulta ---------- */
   function updateIdle() {
     idle.hidden = !(kiosk && !result.hasChildNodes() && !msg.textContent);
   }
@@ -29,51 +30,49 @@ if (requireAuth()) {
     if (!cameraActive()) input.focus();
   }
 
-  /** En quiosco, programa la limpieza automática y reinicia la barra de cuenta regresiva. */
   function scheduleClear() {
     clearTimeout(clearTimer);
     if (!kiosk) { countdown.hidden = true; return; }
     const bar = countdown.firstElementChild;
     bar.style.animation = 'none';
-    void bar.offsetWidth; // reinicia la animación
+    void bar.offsetWidth;
     bar.style.animation = '';
     bar.style.animationDuration = `${AUTO_CLEAR_MS}ms`;
     countdown.hidden = false;
     clearTimer = setTimeout(clearResult, AUTO_CLEAR_MS);
   }
 
-  function lookup(id) {
+  /** Consulta el código de barras en consultar.php (y registra el log en tblog_verificador) */
+  async function lookup(id) {
     result.replaceChildren();
-    input.value = ''; // evita que el siguiente escaneo se concatene con el anterior
+    input.value = '';
     clearFieldError(input);
-
-    const p = store.products.find((x) => x.IDProducto === id);
-    if (!p) {
-      setMsg(msg, 'No se encontró ningún artículo con ese código de barras.');
-      updateIdle();
-      scheduleClear();
-      return;
-    }
     setMsg(msg, '');
 
-    const photo = store.photos[p.IDProducto];
-    const inStock = p.StockActual > 0;
+    try {
+      const data = await apiFetch(`consultar.php?id=${encodeURIComponent(id)}`);
+      const p = data.producto;
+      const inStock = p.StockActual > 0;
 
-    result.append(el('article', { className: 'product-card' },
-      photo
-        ? el('img', { src: photo, alt: `Fotografía de ${p.Nombre}` })
-        : el('div', { className: 'no-photo', textContent: 'Sin fotografía' }),
-      el('div', {},
-        el('span', { className: 'badge', textContent: categoryName(p.IDCategoria) }),
-        el('h3', { textContent: p.Nombre }),
-        el('div', { className: 'price', textContent: money(p.PrecioUnitario) }),
-        el('span', { className: `badge ${inStock ? 'ok' : 'out'}`, textContent: inStock ? `Disponible (${p.StockActual})` : 'Agotado' }),
-        el('dl', {},
-          el('dt', { textContent: 'Marca' }), el('dd', { textContent: p.Marca }),
-          el('dt', { textContent: 'Código' }), el('dd', { textContent: p.IDProducto }),
+      // Dibuja la tarjeta con foto local, categoría, nombre, precio y stock
+      result.append(el('article', { className: 'product-card' },
+        p.Foto
+          ? el('img', { src: `${p.Foto}?t=${Date.now()}`, alt: `Fotografía de ${p.Nombre}` })
+          : el('div', { className: 'no-photo', textContent: 'Sin fotografía' }),
+        el('div', {},
+          el('span', { className: 'badge', textContent: p.NombreCategoria }),
+          el('h3', { textContent: p.Nombre }),
+          el('div', { className: 'price', textContent: money(p.PrecioUnitario) }),
+          el('span', { className: `badge ${inStock ? 'ok' : 'out'}`, textContent: inStock ? `Disponible (${p.StockActual})` : 'Agotado' }),
+          el('dl', {},
+            el('dt', { textContent: 'Marca' }), el('dd', { textContent: p.Marca }),
+            el('dt', { textContent: 'Código' }), el('dd', { textContent: p.IDProducto }),
+          ),
         ),
-      ),
-    ));
+      ));
+    } catch (err) {
+      setMsg(msg, err.message);
+    }
     updateIdle();
     scheduleClear();
   }
@@ -86,22 +85,21 @@ if (requireAuth()) {
     lookup(input.value.trim());
   });
 
-  // Solo dígitos: algunos lectores USB envían prefijos o espacios.
+  // Limpia cualquier carácter no numérico enviado por lectores USB
   input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, ''); });
 
-  /* ---------- Lector USB (teclea el código + Enter) ---------- */
-  // En quiosco, cualquier tecla numérica devuelve el foco al campo para no perder el escaneo.
+  // En modo quiosco, redirige automáticamente cualquier dígito al campo de búsqueda
   document.addEventListener('keydown', (e) => {
     if (!kiosk || e.ctrlKey || e.metaKey || e.altKey) return;
     if (document.activeElement !== input && /^\d$/.test(e.key)) input.focus();
   });
 
-  /* ---------- Modo quiosco ---------- */
+  /* ---------- Control del modo quiosco ---------- */
   async function enterKiosk() {
     kiosk = true;
     document.body.classList.add('kiosk');
     btnExit.hidden = false;
-    try { await document.documentElement.requestFullscreen(); } catch { /* sin pantalla completa: se queda en modo quiosco */ }
+    try { await document.documentElement.requestFullscreen(); } catch {}
     clearResult();
   }
 
@@ -119,10 +117,9 @@ if (requireAuth()) {
 
   $('#btn-kiosk').addEventListener('click', enterKiosk);
   btnExit.addEventListener('click', exitKiosk);
-  // Esc sale de pantalla completa → también sale del modo quiosco.
   document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) exitKiosk(); });
 
-  /* ---------- Cámara (BarcodeDetector) ---------- */
+  /* ---------- Escáner con cámara (BarcodeDetector API) ---------- */
   const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
   const cameraSupported = 'BarcodeDetector' in window && !!navigator.mediaDevices?.getUserMedia && window.isSecureContext;
   const btnCamera = $('#btn-camera');
@@ -160,7 +157,7 @@ if (requireAuth()) {
         const codes = await detector.detect(video);
         const hit = codes.find((c) => /^\d{8,14}$/.test(c.rawValue));
         if (hit) { stopCamera(); lookup(hit.rawValue); }
-      } catch { /* fotograma no legible: se reintenta */ }
+      } catch {}
       detecting = false;
     }, 250);
   }
@@ -177,4 +174,4 @@ if (requireAuth()) {
   btnCamera.addEventListener('click', () => (cameraActive() ? stopCamera() : startCamera()));
   $('#btn-camera-stop').addEventListener('click', stopCamera);
   window.addEventListener('pagehide', stopCamera);
-}
+})();

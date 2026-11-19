@@ -1,48 +1,56 @@
-/* Código compartido por todas las páginas de VerificaPrecios.
-   Frontend solamente: los datos se guardan en localStorage simulando las tablas SQL.
-   Cuando exista backend, reemplaza el objeto `store` por llamadas a la API.
-   Nota: las contraseñas se guardan en texto plano SOLO por ser una demo. */
 'use strict';
 
-/* ---------- Capa de datos (simula tablas) ----------
-   Usuario:           { username, nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, email, puesto, password, role }
-   CategoriaProducto: { IDCategoria, NombreCategoria }
-   Producto:          { IDProducto, Nombre, Marca, IDCategoria (FK), PrecioUnitario, StockActual }
-   Fotografías:       se guardan aparte (no forman parte de la tabla Producto), indexadas por IDProducto,
-                      simulando la carpeta de imágenes del servidor. */
-const store = {
-  get(key, fallback) {
-    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
-  },
-  set(key, value) { localStorage.setItem(key, JSON.stringify(value)); },
-  get users() { return this.get('vp2_users', []); },
-  set users(v) { this.set('vp2_users', v); },
-  get categories() { return this.get('vp2_categorias', []); },
-  set categories(v) { this.set('vp2_categorias', v); },
-  get products() { return this.get('vp2_productos', []); },
-  set products(v) { this.set('vp2_productos', v); },
-  get photos() { return this.get('vp2_fotos', {}); },
-  set photos(v) { this.set('vp2_fotos', v); },
-  get session() { return this.get('vp2_session', null); },
-  set session(v) { this.set('vp2_session', v); },
+// =========================================================================
+// ESTADO GLOBAL EN MEMORIA Y COMUNICACIÓN CON PHP / SQL SERVER
+// =========================================================================
+const appState = {
+  user: null,
+  categories: [],
+  csrfToken: '',
 };
 
-if (!store.users.length) {
-  store.users = [{
-    username: 'admin', nombres: 'Administrador', apellidoPaterno: 'Sistema', apellidoMaterno: '',
-    fechaNacimiento: '1990-01-01', email: 'admin@demo.com', puesto: 'Administrador', password: 'admin123', role: 'admin',
-  }];
-}
-if (!store.categories.length) {
-  store.categories = ['Abarrotes', 'Bebidas', 'Lácteos', 'Frutas y verduras', 'Carnes y embutidos', 'Limpieza', 'Higiene personal', 'Otros']
-    .map((n, i) => ({ IDCategoria: i + 1, NombreCategoria: n }));
+async function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const headers = { ...(options.headers || {}) };
+  if (method !== 'GET' && appState.csrfToken) {
+    headers['X-CSRF-Token'] = appState.csrfToken;
+  }
+  const res = await fetch(url, { credentials: 'same-origin', ...options, headers });
+  const data = await res.json().catch(() => ({ ok: false, error: 'Respuesta inválida del servidor.' }));
+  if (data.csrfToken) appState.csrfToken = data.csrfToken;
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Error en el servidor.');
+  return data;
 }
 
-/* ---------- Utilidades ---------- */
+async function loadSession() {
+  try {
+    const data = await apiFetch('sesion.php');
+    appState.user = data.user;
+  } catch {
+    appState.user = null;
+  }
+  return appState.user;
+}
+
+/** Descarga las categorías desde productos.php una sola vez y las guarda en memoria */
+async function loadCategories() {
+  if (appState.categories.length) return appState.categories;
+  const data = await apiFetch('productos.php?accion=categorias');
+  appState.categories = data.categorias || [];
+  return appState.categories;
+}
+
+// =========================================================================
+// UTILIDADES DE INTERFAZ Y CONTROL DE SESIÓN
+// =========================================================================
 const $ = (sel) => document.querySelector(sel);
 const money = (n) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
-const categoryName = (id) => store.categories.find((c) => c.IDCategoria === Number(id))?.NombreCategoria ?? 'Sin categoría';
+const categoryName = (id) => appState.categories.find((c) => Number(c.IDCategoria) === Number(id))?.NombreCategoria ?? 'Sin categoría';
+const fullName = (u) => `${u.nombres} ${u.apellidoPaterno}`.trim();
+const currentUser = () => appState.user;
+function addPasswordToggles() {} // Reservado para compatibilidad con registro.js
 
+/** Crea elementos HTML dinámicamente con sus propiedades y elementos hijos */
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   Object.assign(node, props);
@@ -50,30 +58,28 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+/** Muestra mensajes de error (rojo) o éxito (verde si ok = true) en pantalla */
 function setMsg(node, text, ok = false) {
   node.textContent = text;
   node.classList.toggle('ok', ok);
 }
 
-const fullName = (u) => `${u.nombres} ${u.apellidoPaterno}`.trim();
-const currentUser = () => store.users.find((u) => u.username.toLowerCase() === store.session) || null;
-
-/* ---------- Sesión y cabecera ---------- */
-/** Sin sesión → login. Si se requiere admin y no lo es → menú. Devuelve el usuario o null. */
-function requireAuth({ admin = false } = {}) {
-  const user = currentUser();
+/** Protege páginas privadas: sin sesión redirige al login; si requiere admin y no lo es, al menú */
+async function requireAuth({ admin = false } = {}) {
+  const user = await loadSession();
   if (!user) { location.replace('index.html'); return null; }
   if (admin && user.role !== 'admin') { location.replace('menu.html'); return null; }
   return user;
 }
 
-/** En login/registro: si ya hay sesión, va al menú. */
-function redirectIfLoggedIn() {
-  if (currentUser()) { location.replace('menu.html'); return true; }
+/** Usado en login y registro: si el usuario ya tiene sesión activa, lo manda directo al menú */
+async function redirectIfLoggedIn() {
+  const user = await loadSession();
+  if (user) { location.replace('menu.html'); return true; }
   return false;
 }
 
-/** Dibuja la barra superior. `active` es el archivo de la página actual. */
+/** Dibuja la barra de navegación superior según el rol del usuario y el botón Salir */
 function renderHeader(active) {
   const user = currentUser();
   const header = $('#topbar');
@@ -93,74 +99,39 @@ function renderHeader(active) {
     link('consultar.html', 'Consultar precio'),
     ...(user.role === 'admin' ? [link('admin.html', 'Administrador')] : []),
     el('span', { className: 'user-label', textContent: fullName(user) }),
-    el('button', { className: 'secondary', textContent: 'Salir', onclick: () => { store.session = null; location.href = 'index.html'; } }),
+    el('button', {
+      className: 'secondary',
+      textContent: 'Salir',
+      onclick: async () => {
+        await apiFetch('logout.php', { method: 'POST' }).catch(() => {});
+        location.href = 'index.html';
+      },
+    }),
   ));
 }
 
-/* ---------- Fotografías ---------- */
-/** Valida JPG/PNG y la reduce (máx. 480 px) para que quepa en localStorage. */
-function imageToDataURL(file, max = 480) {
-  return new Promise((resolve, reject) => {
-    if (!['image/jpeg', 'image/png'].includes(file.type)) return reject(new Error('La fotografía debe ser JPG o PNG.'));
-    if (file.size > 5 * 1024 * 1024) return reject(new Error('La fotografía no debe superar 5 MB.'));
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, max / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL('image/jpeg', 0.8));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen.')); };
-    img.src = url;
-  });
-}
+// =========================================================================
+// FORMULARIO DE ARTÍCULOS (ALTA Y EDICIÓN)
+// =========================================================================
 
-/** Inserta o actualiza un producto (y su foto si se envía). Revierte si el almacenamiento está lleno. */
-function upsertProduct(product, photo) {
-  const prevProducts = store.products;
-  const prevPhotos = store.photos;
-  try {
-    if (photo) store.photos = { ...prevPhotos, [product.IDProducto]: photo };
-    const exists = prevProducts.some((p) => p.IDProducto === product.IDProducto);
-    store.products = exists
-      ? prevProducts.map((p) => (p.IDProducto === product.IDProducto ? product : p))
-      : [...prevProducts, product];
-  } catch {
-    try { store.photos = prevPhotos; } catch { /* sin acción */ }
-    throw new Error('No se pudo guardar: el almacenamiento del navegador está lleno.');
-  }
-}
-
-function deleteProduct(id) {
-  store.products = store.products.filter((p) => p.IDProducto !== id);
-  const { [id]: _removed, ...rest } = store.photos;
-  store.photos = rest;
-}
-
-/* ---------- Formulario de artículo (registro y edición) ---------- */
+/** Crea un par <label> + <input> para reutilizarlo en los formularios */
 function field(label, name, type, value = '', attrs = {}) {
   return el('label', {}, label, el('input', { name, type, value, ...attrs }));
 }
 
-/**
- * Construye los campos del formulario de producto.
- * options: { product, edit, onCancel }
- */
+/** Construye los campos del producto, carga el <select> de categorías y previsualiza la foto */
 function buildProductForm(form, { product = {}, edit = false, onCancel = null } = {}) {
   const select = el('select', { name: 'IDCategoria', required: true },
     el('option', { value: '', textContent: 'Selecciona una categoría', disabled: true, selected: !product.IDCategoria }),
-    ...store.categories.map((c) => el('option', { value: c.IDCategoria, textContent: c.NombreCategoria, selected: c.IDCategoria === product.IDCategoria })));
+    ...appState.categories.map((c) => el('option', {
+      value: c.IDCategoria,
+      textContent: c.NombreCategoria,
+      selected: Number(c.IDCategoria) === Number(product.IDCategoria),
+    })));
 
   const preview = el('img', { className: 'preview', alt: 'Vista previa de la fotografía', hidden: true });
-  const currentPhoto = edit ? store.photos[product.IDProducto] : null;
-  if (currentPhoto) { preview.src = currentPhoto; preview.hidden = false; }
+  // En modo edición muestra la foto actual (agrega ?t=Date.now() para evitar caché)
+  if (edit && product.Foto) { preview.src = `${product.Foto}?t=${Date.now()}`; preview.hidden = false; }
 
   const fileInput = el('input', { type: 'file', name: 'Fotografia', accept: 'image/jpeg,image/png', required: !edit });
   fileInput.addEventListener('change', () => {
@@ -188,40 +159,13 @@ function buildProductForm(form, { product = {}, edit = false, onCancel = null } 
   );
 }
 
-/** Lee el formulario → objeto Producto (sin foto). */
-function readProduct(form) {
-  const f = new FormData(form);
-  return {
-    IDProducto: f.get('IDProducto').trim(),
-    Nombre: f.get('Nombre').trim(),
-    Marca: f.get('Marca').trim(),
-    IDCategoria: Number(f.get('IDCategoria')),
-    PrecioUnitario: Math.round(parseFloat(f.get('PrecioUnitario')) * 100) / 100,
-    StockActual: parseInt(f.get('StockActual'), 10),
-  };
-}
+// =========================================================================
+// VALIDACIÓN DE FORMULARIOS EN CLIENTE
+// =========================================================================
+const MIN_AGE = 16; // Edad mínima permitida para registrarse
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // Peso máximo de fotografía: 5 MB
 
-/** Valida valores numéricos y la FK de categoría. Devuelve mensaje de error o null. */
-function validateProduct(p) {
-  if (!(p.PrecioUnitario > 0)) return 'El precio debe ser mayor a 0.';
-  if (!Number.isInteger(p.StockActual) || p.StockActual < 0) return 'El stock debe ser un entero mayor o igual a 0.';
-  if (!store.categories.some((c) => c.IDCategoria === p.IDCategoria)) return 'Selecciona una categoría válida.';
-  return null;
-}
-
-/** Devuelve la foto reducida del input file, o null si no se eligió. */
-async function readPhoto(form) {
-  const file = new FormData(form).get('Fotografia');
-  return file && file.size ? imageToDataURL(file) : null;
-}
-
-/* ---------- Validación de formularios ----------
-   Reglas declaradas con atributos HTML (required, pattern, minlength, min, max, step, title)
-   más validadores propios (data-validate, data-match). Los mensajes se muestran bajo cada campo.
-   Uso: setupValidation(form) una vez; validateForm(form) al enviar. */
-const MIN_AGE = 16;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-
+/** Calcula la edad en años a partir de una fecha YYYY-MM-DD */
 function ageFrom(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const now = new Date();
@@ -230,6 +174,7 @@ function ageFrom(dateStr) {
   return age;
 }
 
+/** Validadores personalizados referenciados mediante data-validate en HTML */
 const VALIDATORS = {
   birthdate(input) {
     if (!input.value) return '';
@@ -241,18 +186,19 @@ const VALIDATORS = {
   },
 };
 
-/** Etiqueta legible del campo: texto de su <label> sin paréntesis, o su aria-label. */
+/** Extrae el texto limpio de la etiqueta <label> de un campo para mostrar mensajes claros */
 function fieldLabel(input) {
   const raw = input.closest('label')?.childNodes[0]?.textContent || input.getAttribute('aria-label') || 'Este campo';
   return raw.replace(/\s*\(.*?\)\s*/g, ' ').trim();
 }
 
-/** Devuelve el mensaje de error del campo, o '' si es válido. */
+/** Evalúa las reglas de un campo y devuelve el texto de error (o '' si es válido) */
 function fieldError(input) {
   const v = input.validity;
   const value = input.value;
   const label = fieldLabel(input);
 
+  // Validación de archivo de imagen (tipo JPG/PNG y peso máximo)
   if (input.type === 'file') {
     const f = input.files[0];
     if (!f) return input.required ? 'Selecciona una fotografía.' : '';
@@ -260,18 +206,24 @@ function fieldError(input) {
     if (f.size > MAX_PHOTO_BYTES) return 'La fotografía no debe superar 5 MB.';
     return '';
   }
+
+  // Validaciones estándar HTML5
   if (v.valueMissing) return input.tagName === 'SELECT' ? 'Selecciona una opción.' : `${label} es obligatorio.`;
   if (['text', 'search'].includes(input.type) && value && !value.trim()) return 'No puede contener solo espacios.';
   if (v.badInput) return 'Escribe un valor válido.';
   if (input.type === 'email' && v.typeMismatch) return 'Escribe un correo válido (ej. nombre@dominio.com).';
 
+  // Validadores personalizados (fecha de nacimiento)
   const custom = VALIDATORS[input.dataset.validate]?.(input);
   if (custom) return custom;
 
+  // Compara con otro campo (confirmación de contraseña)
   if (input.dataset.match) {
     const other = input.form.elements[input.dataset.match];
     if (other && value !== other.value) return 'Las contraseñas no coinciden.';
   }
+
+  // Validaciones de formato, longitud y rangos numéricos
   if (v.patternMismatch) return input.title || `${label} no tiene un formato válido.`;
   if (input.minLength > 0 && value && value.length < input.minLength) return `${label} debe tener al menos ${input.minLength} caracteres.`;
   if (v.rangeUnderflow) return `El valor mínimo es ${input.min}.`;
@@ -281,6 +233,8 @@ function fieldError(input) {
 }
 
 let errorSeq = 0;
+
+/** Obtiene o crea la etiqueta <small class="field-error"> debajo del campo */
 function errorElement(input) {
   if (input.dataset.errorTarget) return $(input.dataset.errorTarget);
   const holder = input.closest('label') || input.parentElement;
@@ -293,7 +247,7 @@ function errorElement(input) {
   return node;
 }
 
-/** Muestra (o limpia, si msg es '') el error de un campo. */
+/** Muestra o limpia el mensaje de error de un campo y actualiza atributos de accesibilidad */
 function showFieldError(input, msg) {
   const node = errorElement(input);
   node.textContent = msg;
@@ -307,6 +261,7 @@ function showFieldError(input, msg) {
 }
 const clearFieldError = (input) => showFieldError(input, '');
 
+/** Valida un campo individual y devuelve true si es válido */
 function validateField(input) {
   if (input.readOnly || input.disabled) return true;
   const msg = fieldError(input);
@@ -314,7 +269,7 @@ function validateField(input) {
   return !msg;
 }
 
-/** Valida todos los campos; enfoca el primero inválido. Devuelve true si todo es válido. */
+/** Valida todo el formulario y enfoca el primer campo con error */
 function validateForm(form) {
   let first = null;
   form.querySelectorAll('input, select').forEach((input) => {
@@ -324,9 +279,9 @@ function validateForm(form) {
   return !first;
 }
 
-/** Activa la validación en vivo (al salir del campo y al corregirlo). Es seguro llamarla varias veces. */
+/** Activa la validación en vivo al salir de cada campo y al corregir errores */
 function setupValidation(form) {
-  form.noValidate = true; // se usan mensajes propios en lugar de los del navegador
+  form.noValidate = true; // Usa mensajes propios en lugar de los globos del navegador
   if (form.dataset.validation) return;
   form.dataset.validation = '1';
 
@@ -336,7 +291,6 @@ function setupValidation(form) {
     const t = e.target;
     if (!isField(t) || t.readOnly) return;
     if (['text', 'email', 'search'].includes(t.type)) t.value = t.value.trim();
-    // No molestar con "obligatorio" a quien solo pasó por el campo.
     if (!t.value && t.type !== 'file' && t.getAttribute('aria-invalid') !== 'true') return;
     validateField(t);
   });
@@ -345,7 +299,6 @@ function setupValidation(form) {
     const t = e.target;
     if (!isField(t)) return;
     if (t.getAttribute('aria-invalid') === 'true' || t.tagName === 'SELECT' || t.type === 'file') validateField(t);
-    // Si cambia la contraseña, vuelve a comprobar su confirmación.
     form.querySelectorAll(`[data-match="${t.name}"]`).forEach((c) => { if (c.value) validateField(c); });
   };
   form.addEventListener('input', revalidate);
