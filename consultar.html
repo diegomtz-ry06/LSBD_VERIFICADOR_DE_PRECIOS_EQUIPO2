@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Consultar precio | VerificaPrecios</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="topbar"></header>
+  <main>
+    <section class="card medium">
+      <div class="panel-head">
+        <h2>Consultar el precio de un artículo</h2>
+        <button type="button" id="btn-kiosk" class="secondary">🖥️ Modo quiosco</button>
+      </div>
+
+      <form id="form-search" class="search-bar">
+        <input type="text" id="barcode" inputmode="numeric" pattern="[0-9]{8,14}" title="Debe tener entre 8 y 14 dígitos numéricos." data-error-target="#barcode-error"
+               placeholder="Escribe o escanea el código de barras" aria-label="Código de barras" autocomplete="off" required autofocus>
+        <button type="submit">Consultar</button>
+        <button type="button" id="btn-camera" class="secondary" hidden>📷 Cámara</button>
+      </form>
+      <p id="barcode-error" class="field-error" aria-live="polite"></p>
+      <p id="camera-unsupported" class="hint" hidden>
+        La lectura con cámara requiere Chrome o Edge y abrir la página desde HTTPS o localhost. El lector USB funciona en cualquier navegador.
+      </p>
+
+      <div id="camera-box" hidden>
+        <video id="video" playsinline muted></video>
+        <p class="hint">Apunta la cámara al código de barras.</p>
+        <button type="button" id="btn-camera-stop" class="secondary">Cerrar cámara</button>
+      </div>
+
+      <p id="msg" class="msg" role="alert"></p>
+      <p id="idle" class="idle" hidden>Escanee el código de barras del producto</p>
+      <div id="result" aria-live="polite"></div>
+      <div id="countdown" class="countdown" hidden><span></span></div>
+    </section>
+  </main>
+
+  <button type="button" id="btn-exit-kiosk" class="exit-kiosk" hidden>✕ Salir del modo quiosco</button>
+
+  <script src="common.js"></script>
+  <script src="consultar.js"></script>
+</body>
+</html>

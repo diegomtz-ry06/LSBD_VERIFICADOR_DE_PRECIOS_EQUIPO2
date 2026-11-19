@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Menú principal | VerificaPrecios</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="topbar"></header>
+  <main>
+    <section class="card center">
+      <p id="greeting" class="hint"></p>
+      <h2>¿Qué desea hacer?</h2>
+      <div class="options">
+        <a class="option" href="registrar-articulo.html">
+          <span class="icon" aria-hidden="true">📦</span>
+          <strong>Registrar un nuevo artículo</strong>
+          <span class="desc">Da de alta un producto con su precio, stock y fotografía.</span>
+        </a>
+        <a class="option" href="consultar.html">
+          <span class="icon" aria-hidden="true">🔍</span>
+          <strong>Consultar el precio de un artículo</strong>
+          <span class="desc">Escribe el código de barras y revisa su precio.</span>
+        </a>
+        <a class="option" href="admin.html" id="opt-admin" hidden>
+          <span class="icon" aria-hidden="true">🛠️</span>
+          <strong>Módulo de administrador</strong>
+          <span class="desc">Edita o elimina los productos registrados.</span>
+        </a>
+      </div>
+    </section>
+  </main>
+  <script src="common.js"></script>
+  <script src="menu.js"></script>
+</body>
+</html>

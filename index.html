@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iniciar sesión | VerificaPrecios</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="topbar"></header>
+  <main>
+    <section class="card narrow center">
+      <img class="logo" src="favicon.svg" alt="">
+      <h2>Iniciar sesión</h2>
+      <form id="form-login" style="text-align:left">
+        <label>Usuario <input type="text" name="username" required autocomplete="username"></label>
+        <label>Contraseña <input type="password" name="password" required autocomplete="current-password"></label>
+        <button type="submit">Entrar</button>
+      </form>
+      <p id="msg" class="msg" role="alert"></p>
+      <p>¿No tienes usuario? <a href="registro.html">Regístrate aquí</a></p>
+      <p class="hint">Demo administrador: admin / admin123</p>
+    </section>
+  </main>
+  <script src="common.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>
