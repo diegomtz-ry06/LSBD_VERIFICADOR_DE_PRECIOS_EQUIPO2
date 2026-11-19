@@ -26,7 +26,9 @@ if (session_status() === PHP_SESSION_NONE) {
 sqlsrv_configure('WarningsReturnAsErrors', 0);
 
 // Ajusta $serverName según tu instancia local (ej. 'localhost\SQLEXPRESS' o '.')
-$serverName = 'localhost\\SQLEXPRESS';
+// Usar 'localhost' o '.' apunta a tu instancia predeterminada (D-VIVOBOOK-IRIS)
+// y mantiene el código portable para cuando lo pases a la VM
+$serverName = 'localhost';
 $connectionOptions = [
     'Database'               => 'VerificadorPreciosDB',
     'Uid'                    => 'user_basico',
